@@ -57,14 +57,14 @@ function plot_spectrum(signal, fs)
     return p
 end
 
-function plot_const(I_signal, Q_signal)
+function plot_const(I_signal, Q_signal; const_lims=(-1.5, 1.5))
     p = scatter(I_signal, Q_signal,
         title="Constellation Diagram: QPSK Signal",
         xlabel="In-Phase (I)",
         ylabel="Quadrature (Q)",
         label="QPSK Signal",
-        xlims=(-1.5, 1.5),
-        ylims=(-1.5, 1.5),
+        xlims=const_lims,
+        ylims=const_lims,
         aspect_ratio=:equal,
         # markerstrokewidth=0,
         alpha=0.5,
@@ -112,14 +112,14 @@ function plot_clean_vs_aliased(signal, signal_aliased, fs, fs_aliased, I_clean, 
     return final_plot
 end
 
-function plot_clean(signal, I_signal, Q_signal, fs, zoom_limit)
+function plot_clean(signal, I_signal, Q_signal, fs, zoom_limit; const_lims=(-1.5, 1.5))
 
     t_zoom, sig_zoom = zoom_time(signal, fs, zoom_limit)
 
     # Plot the clean signal in time domain
     p_time = plot_time(t_zoom, sig_zoom)
     p_freq = plot_spectrum(signal, fs)
-    p_const = plot_const(I_signal, Q_signal)
+    p_const = plot_const(I_signal, Q_signal; const_lims=const_lims)
     # Combine time, frequency and constellation plots
     l = @layout [[a; b] c]
     final_plot = plot(p_time, p_freq, p_const,

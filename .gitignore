@@ -8,7 +8,7 @@
 Manifest.toml
 
 # Datasets and generated signals (Crucial for your project!)
-data/
+Images/
 *.jld2    # Julia's standard data format (like HDF5)
 *.hdf5
 *.wav

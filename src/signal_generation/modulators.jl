@@ -78,7 +78,7 @@ end
 function apply_dsss(complex_syms::Vector{ComplexF64}, PN_code::Vector{Float64})
     # Kronecker product to spread the complex symbols
     spread_signal = kron(complex_syms, PN_code)
-    return spread_signal ./ sqrt(length(PN_code)) # Normalise the power after spreading
+    return spread_signal
 end
 
 # ==============================================================================
@@ -199,7 +199,7 @@ function apply_carrier(baseband_signal::Vector{ComplexF64}, fc::Float64, fs::Flo
     return passband_signal
 end
 
-function demodulate_signal(passband_signal::Vector{ComplexF64}, sps::Int, fc::Float64, fs::Float64, h_rrc::Vector{Float64})
+function demodulate_signal(passband_signal::Vector{Float64}, sps::Int, fc::Float64, fs::Float64, h_rrc::Vector{Float64})
     t = (0:length(passband_signal)-1) ./ fs
 
     # 1. Downconvert to baseband (Multiply by * 2.0 to recover amplitude lost in modulation)
@@ -216,17 +216,20 @@ function demodulate_signal(passband_signal::Vector{ComplexF64}, sps::Int, fc::Fl
     # This is a simple timing offset. In practice, this would be determined by a timing recovery algorithm.
     # Thanks to the trimming, we can pick samples starting at idx 1 now.
 
-    # 3. Downsample to get the exact symbols back!
-    symbols_rx = matched[1:sps:end]
+    # # 3. Downsample to get the exact symbols back!
+    # symbols_rx = matched[1:sps:end]
 
-    return real.(symbols_rx), imag.(symbols_rx)
+    # return real.(symbols_rx), imag.(symbols_rx)
+    return real.(matched), imag.(matched)
 end
 
 # ==============================================================================
 # 6. THE MASTER GENERATOR
 # ==============================================================================
 function generate_signal(emitter::TargetEmitter, num_symbols::Int)
-    # 1. Baseband & Spreading
+    # ===============================
+    # CLEAN QPSK SIGNAL FOR PLOTTING
+    # ===============================
     syms = generate_qpsk_symbols(num_symbols)
     h_rrc = create_rrc_filter(emitter.sps, emitter.β, emitter.span)
 
@@ -234,28 +237,38 @@ function generate_signal(emitter::TargetEmitter, num_symbols::Int)
     shaped_baseband = apply_pulse_shaping(syms, h_rrc, emitter.sps)
 
     # Upconvert to Passband
-    qpsk_passband_signal = apply_carrier(shaped_baseband, emitter.fc, emitter.fs)
+    qpsk_passband = apply_carrier(shaped_baseband, emitter.fc, emitter.fs)
 
+    # ==============
+    # DSSS PIPELINE
+    # ==============
     code = generate_gold_code(emitter.lfsr_bits)
-    spread = apply_dsss(syms, code)
+    syms_spread = apply_dsss(syms, code)
     
-    h_rrc = create_rrc_filter(emitter.sps, emitter.β, emitter.span)
-    dsss_baseband = apply_pulse_shaping(spread, h_rrc, emitter.sps)
-    
-    # 2. Upconvert & Hopping
+    h_rrc_chip = create_rrc_filter(emitter.sps_chip, emitter.β, emitter.span)
+    dsss_baseband = apply_pulse_shaping(syms_spread, h_rrc_chip, emitter.sps_chip)
+
+    # Upconvert to Passband (for plotting. FHSS will be the one we use for the final channel effects)
+    dsss_passband = apply_carrier(dsss_baseband, emitter.fc, emitter.fs)
+
+    # ========================
+    # FHSS AND CHANNEL EFFECTS
+    # ========================
+    # Upconvert & Hopping
     fhss_passband = apply_frequency_hopping(dsss_baseband, emitter.fs, emitter.hop_rate, emitter.hop_freq)
     
-    # 3. Channel Effects
+    # Channel Effects
     final_rx, _ = apply_channel_effects(fhss_passband, emitter.snr_db; doppler=true)
     
     # Return everything neatly packaged!
     return (
         syms = syms,
-        qpsk_clean = qpsk_passband_signal, # The clean QPSK passband signal before spreading and hopping (float vector)
-        dsss = dsss_baseband,
+        qpsk_clean = qpsk_passband, # The clean QPSK passband signal before spreading and hopping (float vector)
+        dsss = dsss_passband,
         fhss = fhss_passband,
         final = final_rx,
-        matched_filter = h_rrc
+        matched_filter = h_rrc,             # For QPSK demodulation
+        matched_filter_chip = h_rrc_chip    # For DSSS demodulation
     )
 end
 
