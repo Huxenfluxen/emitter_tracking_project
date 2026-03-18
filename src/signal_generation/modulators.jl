@@ -18,6 +18,7 @@ Base.@kwdef struct TargetEmitter
     fc::Float64                        # Carrier frequency
     fs::Float64                        # Sampling frequency
     sps::Int                           # Samples per symbol
+    sps_chip::Int                      # Samples per chip for DSSS
     β::Float64                         # RRC Roll-off factor
     span::Int                          # RRC span
     snr_db::Float64                    
@@ -116,8 +117,7 @@ function apply_pulse_shaping(spread_signal::Vector{ComplexF64}, h_rrc::Vector{Fl
     delay = floor(Int, length(h_rrc) / 2)
     conv_indices = delay + 1 : delay + length(impulse_train)
     
-    # DSP.conv works on complex numbers natively!
-    shaped_signal = conv(impulse_train, h_rrc)[conv_indices]
+    shaped_signal = conv(impulse_train, h_rrc)[conv_indices]# .* sps # Scale by sps to maintain power level after convolution
     
     return shaped_signal
 end
@@ -190,41 +190,36 @@ end
 # ==============================================================================
 # 5. RECEIVER UTILITIES (For plotting and verification)
 # ==============================================================================
-function demodulate_signal(signal::Vector{ComplexF64}, sps::Int, fc::Float64, fs::Float64, h_rrc::Vector{Float64})
-    N = length(signal)
-    t = (0:N-1) / fs
-    carrier_I = cos.(2π * fc .* t)
-    carrier_Q = sin.(2π * fc .* t)
-    # Mixing part: multiply received signal with carriers to get I and Q components (bring it to baseband)
-    # restore the amplitude by multiplying with 2
-    I_demod = 2.0 .*signal .* carrier_I
-    Q_demod = -2.0 .*signal .* carrier_Q
+function apply_carrier(baseband_signal::Vector{ComplexF64}, fc::Float64, fs::Float64)
+    t = (0:length(baseband_signal)-1) ./ fs
+    # Multiply by carrier and take the real part to get the physical passband signal
+    carrier = exp.(im .* 2π .* fc .* t)
+    passband_signal = real.(baseband_signal .* carrier)
+    
+    return passband_signal
+end
+
+function demodulate_signal(passband_signal::Vector{ComplexF64}, sps::Int, fc::Float64, fs::Float64, h_rrc::Vector{Float64})
+    t = (0:length(passband_signal)-1) ./ fs
+
+    # 1. Downconvert to baseband (Multiply by * 2.0 to recover amplitude lost in modulation)
+    baseband_rx = passband_signal .* exp.(-im .* 2π .* fc .* t) .* 2.0
 
     # Trimming the tail to match length of original signal before convolution to avoid issues with the convolution and time vector lengths.
     # Find the delay created by the convolution with the RRC and trim the demodulated signals. 
-    h_len = length(h_rrc)
-    delay = floor(Int, h_len / 2)
-    # Filtering part: Apply the matched filter (RRC) to the demodulated I and Q components, including the delay from convoluting.
-    conv_indices = delay + 1 : delay + N
-    I_filtered = conv(I_demod, h_rrc)[conv_indices]
-    Q_filtered = conv(Q_demod, h_rrc)[conv_indices]
+    # 2. Matched Filter
+    delay = floor(Int, length(h_rrc) / 2)
+    conv_indices = delay + 1 : delay + length(baseband_rx)
+    matched = conv(baseband_rx, h_rrc)[conv_indices]
 
-    sps_int = round(Int, sps) # Ensure sps is integer
     # Timing Recovery: Pick the correct sample (peak of the poulse) to decide the symbol
     # This is a simple timing offset. In practice, this would be determined by a timing recovery algorithm.
     # Thanks to the trimming, we can pick samples starting at idx 1 now.
 
-    # filter_delay = Int(floor(length(h_rrc) / 2))
-    # symbol_offset = Int(floor(sps_int / 2))
-    # start_idx = filter_delay + symbol_offset
+    # 3. Downsample to get the exact symbols back!
+    symbols_rx = matched[1:sps:end]
 
-    start_idx = 1 # Start at the first sample after trimming. 
-    indices = start_idx:sps_int:length(I_filtered) 
-    
-    I_scatter = I_filtered[indices]
-    Q_scatter = Q_filtered[indices]
-
-    return I_scatter, Q_scatter
+    return real.(symbols_rx), imag.(symbols_rx)
 end
 
 # ==============================================================================
@@ -233,9 +228,13 @@ end
 function generate_signal(emitter::TargetEmitter, num_symbols::Int)
     # 1. Baseband & Spreading
     syms = generate_qpsk_symbols(num_symbols)
-    carrier_qpsk_signal = real.(syms) # For plotting the clean QPSK signal before spreading and hopping
     h_rrc = create_rrc_filter(emitter.sps, emitter.β, emitter.span)
-    qpsk_passband_signal = apply_pulse_shaping(syms, h_rrc, emitter.sps) # This is the clean QPSK signal after pulse shaping, before spreading and hopping. We can use this for comparison in the plots.
+
+    # Pulse shape the symbols
+    shaped_baseband = apply_pulse_shaping(syms, h_rrc, emitter.sps)
+
+    # Upconvert to Passband
+    qpsk_passband_signal = apply_carrier(shaped_baseband, emitter.fc, emitter.fs)
 
     code = generate_gold_code(emitter.lfsr_bits)
     spread = apply_dsss(syms, code)
@@ -252,7 +251,7 @@ function generate_signal(emitter::TargetEmitter, num_symbols::Int)
     # Return everything neatly packaged!
     return (
         syms = syms,
-        qpsk_clean = qpsk_passband_signal, 
+        qpsk_clean = qpsk_passband_signal, # The clean QPSK passband signal before spreading and hopping (float vector)
         dsss = dsss_baseband,
         fhss = fhss_passband,
         final = final_rx,

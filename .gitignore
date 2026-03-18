@@ -1,0 +1,17 @@
+# Julia specific ignores
+*.jl.cov
+*.jl.tecov
+*.jl.mem
+.julia_history
+
+# Environment/Project tracking (Optional: some people commit Manifest, some don't. Ignore for now to be safe)
+Manifest.toml
+
+# Datasets and generated signals (Crucial for your project!)
+data/
+*.jld2    # Julia's standard data format (like HDF5)
+*.hdf5
+*.wav
+
+# IDE files
+.vscode/
