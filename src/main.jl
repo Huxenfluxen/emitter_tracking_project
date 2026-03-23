@@ -22,18 +22,37 @@ Rs = 20.0                           # Symbol rate in symbols per second
 fs_clean = 4400.0                   # Sampling frequency in Hz (high for smooth DSSS and FHSS)
 num_symbols = Int(T_duration * Rs)  # Number of symbols
 
+# =============================================================================================
+# Generate sensors that will receive the mixed signals. This is the environment for FastICA.
+
+Base.@kwdef struct Sensor
+    id::Int
+    location::Tuple{Float64, Float64}
+end
+
+sensors = [
+    Sensor(1, (0.0, 0.0)),
+    Sensor(2, (10.0, 0.0)),
+    Sensor(3, (0.0, 10.0)),
+    Sensor(4, (10.0, 10.0)),
+    Sensor(5, (5.0, 5.0)),
+    Sensor(6, (15.0, 5.0))
+]
+
+
 # Main target
 # Strong signal moving east at 15 m/s, starting at origin
 target1 = SignalGeneration.TargetEmitter(
     id = 1, location = (0.0, 0.0), velocity = (15.0, 0.0),
-    fc = 511.0, fs = 4400.0, sps = 220, sps_chip = 8, β = 0.35, span = 10,
+    fc = 511.0, fs = fs_clean, sps = 220, sps_chip = 8, β = 0.35, span = 10,
     snr_db = 15.0, hop_rate = 10.0, lfsr_bits = 7,
     hop_freq = [400.0, 800.0, 600.0, 1000.0, 500.0, 1100.0]
 )
-# 1. Define how many targets you want
+
+# Number of targets (including the main target)
 num_targets = 5
 
-# 2. Use a loop comprehension to instantly spawn N random targets
+# Loop comprehension to generate random background targets with varying parameters
 background_targets = [
     TargetEmitter(
         id = i, 
@@ -140,7 +159,7 @@ savefig(final_plot, "src/Images/final_qpsk_time_zoom.png")
 println("Final channel plot saved to Images/final_qpsk_time_zoom.png")
 
 # ==============================================================================
-# 2. GENERATE AND MIX MULTIPLE SIGNALS
+# GENERATE AND MIX MULTIPLE SIGNALS
 # ==============================================================================
 println("Generating signals for all targets...")
 
@@ -150,10 +169,11 @@ all_signals = [generate_signal(t, num_symbols) for t in targets]
 # ==============================================================================
 # MULTI-SENSOR MIXING (The environment for FastICA)
 # ==============================================================================
-num_sensors = 6 # Must be >= num_targets
+println("Mixing signals in a multi-sensor environment...")
+num_sensors = length(sensors) # Must be >= num_targets for FastICA to work well
 num_targets = length(targets)
 
-# 1. Pad signals to the exact same length
+# Padding signals to the exact same length
 max_len = maximum([length(sig.final) for sig in all_signals])
 padded_signals = [vcat(sig.final, zeros(ComplexF64, max_len - length(sig.final))) for sig in all_signals]
 
@@ -164,7 +184,22 @@ S = vcat([real.(sig)' for sig in padded_signals]...)
 # 3. Create the physical Mixing Matrix A (Size: num_sensors x num_targets)
 # In a real environment, this represents the attenuation and phase shifts.
 # For BSS simulation, a random matrix perfectly models an unknown physical environment.
-A = randn(num_sensors, num_targets) 
+# A = randn(num_sensors, num_targets) 
+
+A = zeros(Float64, num_sensors, num_targets)
+for i in 1:num_sensors
+    for j in 1:num_targets
+        dx = sensors[i].location[1] - targets[j].location[1]
+        dy = sensors[i].location[2] - targets[j].location[2]
+        dist = sqrt(dx^2 + dy^2)
+        
+        # Physical voltage attenuation is inversely proportional to distance (1/d)
+        A[i, j] = 1.0 / max(dist, 1.0) # Max prevents division by zero if target is ON the sensor
+    end
+end
+
+# Normalize A so the matrix math stays stable
+A = A ./ maximum(A)
 
 # 4. Generate the received Sensor Matrix X (Size: num_sensors x max_len)
 # X = A * S
@@ -177,19 +212,65 @@ X_noisy = X .+ sensor_noise
 println("Generated Sensor Matrix X of size: ", size(X_noisy))
 
 # ==============================================================================
-# 3. PLOTTING THE CHAOS
+# 3. PLOTTING THE CHAOS THE SENSORS RECEIVE (MIXED SIGNALS)
 # ==============================================================================
-# Let's look at what the sensor actually receives
-zoom_limit = 0.5
-t_mixed = (0:size(X_noisy, 2)-1) ./ target1.fs
+println("Plotting the mixed sensor input...")
+sensor_1_reading = X_noisy[1, :]
 
-mixed_plot = plot(
-    t_mixed[1:Int(zoom_limit*target1.fs)], 
-    X_noisy[1, 1:Int(zoom_limit*target1.fs)],   # PLotting Sensor 1
+zoom_limit = 0.5 # seconds
+t_mixed = (0:length(sensor_1_reading)-1) ./ fs_clean
+
+mixed_plot_time = plot(
+    t_mixed[1:Int(zoom_limit*fs_clean)], 
+    sensor_1_reading[1:Int(zoom_limit*fs_clean)],   # PLotting Sensor 1
     title="Mixed Sensor Input (5 Targets, FHSS + DSSS + Channel Effects)",
     xlabel="Time (s)", ylabel="Amplitude",
     label="Combined Passband Signal",
     color=:purple,
     grid=true
 )
+
+freqs, magnitude = get_spectrum(sensor_1_reading, fs_clean)
+mixed_plot_freq = plot(freqs, magnitude,
+    title="Frequency Spectrum: Mixed QPSK signal",
+    xlabel="Frequency (Hz)",
+    ylabel="Magnitude",
+    label="Signal Spectrum",
+    xlims=(-fs_clean/2, fs_clean/2),
+    grid=true,
+    legend=:outertop)
+
+plots = [mixed_plot_time, mixed_plot_freq]
+mixed_plot = plot(plots..., layout=(2,1), size=(800,400))
+
 display(mixed_plot)
+
+savefig(mixed_plot, "src/Images/mixed_sensor_input.png")
+println("Mixed sensor input plot saved to Images/mixed_sensor_input.png")
+
+using HDF5
+
+# ==============================================================================
+# SAVE DATASET FOR RECEIVER PIPELINE
+# ==============================================================================
+dataset_path = "data/sensor_recording.h5"
+
+println("Saving dataset to $dataset_path ...")
+
+h5open(dataset_path, "w") do file
+    # Save the matrices
+    file["X_noisy"] = X_noisy
+    file["S_true"]  = S
+    file["A_true"]  = A  # The true mixing matrix
+    
+    # Save the environment metadata needed for the receiver
+    file["fs"] = target1.fs
+    file["num_targets"] = num_targets
+    file["num_sensors"] = num_sensors
+    
+    # Save the true locations for your tracking algorithm later!
+    locations = hcat([collect(t.location) for t in targets]...)
+    file["true_locations"] = locations
+end
+
+println("Dataset saved successfully!")
