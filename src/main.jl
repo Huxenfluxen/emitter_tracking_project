@@ -66,21 +66,18 @@ background_targets = [
     ) for i in 2:num_targets
 ]
 
-targets = vcat(target1, background_targets)
-
-
 # ==========================
 # 2. GENERATE CLEAN SIGNALS
 # ==========================
 println("Running signal pipeline...")
-signals = SignalGeneration.generate_signal(target1, num_symbols);
+signal_1 = SignalGeneration.generate_signal(target1, num_symbols);
 println("Signal generation complete.")
 
 # =====================================
 # 2. VISUALIZE CLEAN VS ALIASED SIGNAL
 # =====================================
 println("Generating clean and aliased signals for comparison...")
-qpsk_signal_clean = signals.qpsk_clean; # Passband QPSK signal (real part)
+qpsk_signal_clean = signal_1.qpsk_clean; # Passband QPSK signal (real part)
 # Generate aliased version of the clean signal by downsampling
 downsample_factor = 25;
 # Aliasing. Compare a high rate sampled QPSK and an aliased version (downsampled)
@@ -128,14 +125,14 @@ println("Clean plot saved to Images/qpsk_clean.png")
 # ========================
 println("Plotting DSSS signal...")
 I_dsss, Q_dsss = demodulate_signal(
-    signals.dsss,           # Passband DSSS signal
+    signal_1.dsss,           # Passband DSSS signal
     target1.sps_chip,
     target1.fc, 
     target1.fs, 
-    signals.matched_filter_chip
+    signal_1.matched_filter_chip
 )
 
-dsss_plot = plot_clean(signals.dsss, I_dsss, Q_dsss, target1.fs, 0.5; const_lims=(-1.5, 1.5))
+dsss_plot = plot_clean(signal_1.dsss, I_dsss, Q_dsss, target1.fs, 0.5; const_lims=(-1.5, 1.5))
 savefig(dsss_plot, "src/Images/dsss_qpsk_time_zoom.png")
 println("DSSS plot saved to Images/dsss_qpsk_time_zoom.png")
 
@@ -144,7 +141,7 @@ println("DSSS plot saved to Images/dsss_qpsk_time_zoom.png")
 # ===========================
 samples_per_hop = round(Int, target1.fs / target1.hop_rate)
 win_size = nextpow(2, samples_per_hop)
-p_fhss = spectrogram(real.(signals.fhss), win_size, div(win_size, 2); fs=target1.fs)
+p_fhss = spectrogram(real.(signal_1.fhss), win_size, div(win_size, 2); fs=target1.fs)
 
 p_spectrogram = heatmap(p_fhss.time, p_fhss.freq, 10*log10.(p_fhss.power),
     title="FHSS Spectrogram", color=:viridis)
@@ -154,7 +151,7 @@ println("FHSS plot saved to Images/fhss_qpsk_spectrogram.png")
 # =====================================
 # 5. PLOT FINAL CHANNEL (Faded + AWGN)
 # =====================================
-final_plot = plot_clean(real.(signals.final), real.(signals.final), imag.(signals.final), target1.fs, 0.5; const_lims=(-1.5, 1.5))
+final_plot = plot_clean(real.(signal_1.final), real.(signal_1.final), imag.(signal_1.final), target1.fs, 0.5; const_lims=(-1.5, 1.5))
 savefig(final_plot, "src/Images/final_qpsk_time_zoom.png")
 println("Final channel plot saved to Images/final_qpsk_time_zoom.png")
 
@@ -164,7 +161,8 @@ println("Final channel plot saved to Images/final_qpsk_time_zoom.png")
 println("Generating signals for all targets...")
 
 # Generate the full pipeline for every target in the array
-all_signals = [generate_signal(t, num_symbols) for t in targets]
+all_signals = vcat(signal_1, [generate_signal(t, num_symbols) for t in background_targets])
+targets = vcat(target1, background_targets)
 
 # ==============================================================================
 # MULTI-SENSOR MIXING (The environment for FastICA)
