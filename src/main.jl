@@ -1,4 +1,5 @@
 using Revise # This must be the first line!
+ENV["GKSwstype"] = "100"
 using Plots
 using Measures
 using Random
@@ -61,7 +62,7 @@ background_targets = [
         fc = 511.0, fs = fs_clean, sps = 220, sps_chip = 8, β = 0.35, span = 10,
         snr_db = rand(5.0:15.0), # Random power levels
         hop_rate = 10.0, 
-        lfsr_bits = rand(7:10),  # Different Gold codes
+        lfsr_bits = 7,  # Different Gold codes (NOT NOW, but could be extended to rand(7:10) for instance)
         hop_freq = [400.0, 800.0, 600.0, 1000.0, 500.0, 1100.0]
     ) for i in 2:num_targets
 ]
@@ -79,7 +80,7 @@ println("Signal generation complete.")
 println("Generating clean and aliased signals for comparison...")
 qpsk_signal_clean = signal_1.qpsk_clean; # Passband QPSK signal (real part)
 # Generate aliased version of the clean signal by downsampling
-downsample_factor = 25;
+downsample_factor = 5;
 # Aliasing. Compare a high rate sampled QPSK and an aliased version (downsampled)
 qpsk_signal_aliased = qpsk_signal_clean[1:downsample_factor:end];
 
@@ -106,12 +107,15 @@ display(clean_vs_aliased_plot)
 savefig(clean_vs_aliased_plot, "src/Images/qpsk_clean_vs_aliased.png")
 println("Clean vs Aliased plot saved to Images/qpsk_clean_vs_aliased.png")
 
-clean_plot = plot_clean(qpsk_signal_clean, I_clean, Q_clean, target1.fs, zoom_limit)
+clean_plot = plot_clean(qpsk_signal_clean, I_clean, Q_clean, target1.fs, zoom_limit;
+                        sig_label="Clean QPSK")
 zoom_x_start = 0.20
 zoom_x_end   = 0.25
 zoom_y_span  = (-0.15, 0.15) # Adjust based on your signal amplitude
 lens!(clean_plot, [zoom_x_start, zoom_x_end], [zoom_y_span[1], zoom_y_span[2]], 
           inset = (1, bbox(0.72, 0, 0.4, 0.3)), # Place inset in center-right
+          yticks = (-0.10:0.10:0.10),
+          tickfontsize = 7,
           color =:red,
           linewidth=2,
           subplot=2)
@@ -129,10 +133,12 @@ I_dsss, Q_dsss = demodulate_signal(
     target1.sps_chip,
     target1.fc, 
     target1.fs, 
-    signal_1.matched_filter_chip
+    signal_1.matched_filter_chip;
+    downsample=false
 )
 
-dsss_plot = plot_clean(signal_1.dsss, I_dsss, Q_dsss, target1.fs, 0.5; const_lims=(-1.5, 1.5))
+dsss_plot = plot_clean(signal_1.dsss, I_dsss, Q_dsss, target1.fs, 0.5;
+                       sig_label="DSSS-QPSK", const_lims=(-0.25, 0.25))
 savefig(dsss_plot, "src/Images/dsss_qpsk_time_zoom.png")
 println("DSSS plot saved to Images/dsss_qpsk_time_zoom.png")
 
@@ -144,14 +150,18 @@ win_size = nextpow(2, samples_per_hop)
 p_fhss = spectrogram(real.(signal_1.fhss), win_size, div(win_size, 2); fs=target1.fs)
 
 p_spectrogram = heatmap(p_fhss.time, p_fhss.freq, 10*log10.(p_fhss.power),
-    title="FHSS Spectrogram", color=:viridis)
+    title="FHSS Spectrogram — Power (dB/Hz)",
+    xlabel="Time (s)",
+    ylabel="Frequency (Hz)",
+    color=:viridis)
 savefig(p_spectrogram, "src/Images/fhss_qpsk_spectrogram.png")
 println("FHSS plot saved to Images/fhss_qpsk_spectrogram.png")
 
 # =====================================
 # 5. PLOT FINAL CHANNEL (Faded + AWGN)
 # =====================================
-final_plot = plot_clean(real.(signal_1.final), real.(signal_1.final), imag.(signal_1.final), target1.fs, 0.5; const_lims=(-1.5, 1.5))
+final_plot = plot_clean(real.(signal_1.final), real.(signal_1.final), imag.(signal_1.final), target1.fs, 0.5;
+                        sig_label="Received FHSS-DSSS-QPSK", const_lims=(-0.35, 0.35))
 savefig(final_plot, "src/Images/final_qpsk_time_zoom.png")
 println("Final channel plot saved to Images/final_qpsk_time_zoom.png")
 
@@ -239,9 +249,9 @@ mixed_plot_freq = plot(freqs, magnitude,
     legend=:outertop)
 
 plots = [mixed_plot_time, mixed_plot_freq]
-mixed_plot = plot(plots..., layout=(2,1), size=(800,400))
+mixed_plot = plot(plots..., layout=(2,1), size=(1000, 600), margin=6mm, top_margin=8mm)
 
-display(mixed_plot)
+# display(mixed_plot)
 
 savefig(mixed_plot, "src/Images/mixed_sensor_input.png")
 println("Mixed sensor input plot saved to Images/mixed_sensor_input.png")

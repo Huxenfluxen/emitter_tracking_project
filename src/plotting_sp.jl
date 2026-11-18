@@ -33,36 +33,37 @@ function get_spectrum(signal, fs)
     return freqs, magnitude
 end
 
-function plot_time(t_zoom, signal_zoom)
+function plot_time(t_zoom, signal_zoom; sig_label="QPSK Signal")
     p = plot(t_zoom, signal_zoom,
-        label="QPSK Signal",
+        label=sig_label,
         xlabel="Time (s)",
         ylabel="Amplitude",
-        title="Time Domain: QPSK Signal",
+        title="Time Domain: $sig_label",
         grid=true,
         legend=:outertop)
     return p
 end
 
-function plot_spectrum(signal, fs)
+function plot_spectrum(signal, fs; sig_label="QPSK Signal")
     freqs, magnitude = get_spectrum(signal, fs)
     p = plot(freqs, magnitude,
-        title="Frequency Spectrum: QPSK signal",
+        title="Frequency Spectrum: $sig_label",
+        titlefontsize=11,
         xlabel="Frequency (Hz)",
         ylabel="Magnitude",
-        label="QPSK Signal Spectrum",
+        label="$sig_label Spectrum",
         xlims=(-fs/4, fs/4),
         grid=true,
         legend=:outertop)
     return p
 end
 
-function plot_const(I_signal, Q_signal; const_lims=(-1.5, 1.5))
+function plot_const(I_signal, Q_signal; sig_label="QPSK Signal", const_lims=(-1.5, 1.5))
     p = scatter(I_signal, Q_signal,
-        title="Constellation Diagram: QPSK Signal",
+        title="Constellation Diagram: $sig_label",
         xlabel="In-Phase (I)",
         ylabel="Quadrature (Q)",
-        label="QPSK Signal",
+        label="$sig_label",
         xlims=const_lims,
         ylims=const_lims,
         aspect_ratio=:equal,
@@ -96,37 +97,40 @@ function plot_clean_vs_aliased(signal, signal_aliased, fs, fs_aliased, I_clean, 
     # Add constellation diagrams for both signals
     p_const = plot_const(I_clean, Q_clean)
     scatter!(p_const, I_aliased, Q_aliased,
-        title="Constellation Diagram: Clean vs Aliased QPSK Signal",
+        title="Constellation: Clean vs Aliased",
+        titlefontsize=11,
         label="Aliased QPSK Signal")
 
 
     # Combine time, frequency and constellation plots
     l = @layout [[a; b] c]
     final_plot = plot(p_time, p_freq, p_const,
-        #title = "Clean QPSK Signal (fs = $fs Hz >> 2fc = $(2*fc) Hz) vs Aliased Version (fs = $(fs/downsample_factor) Hz << 2fc = $(2*fc) Hz)",
         layout = l, 
         size = (1300, 600), 
-        margin = 5mm,           # Global margin for all sides
-        bottom_margin = 15mm,   # Extra space for the cut-off frequency labels
+        margin = 5mm,
+        top_margin = 10mm,
+        bottom_margin = 15mm,
         left_margin = 10mm)
     return final_plot
 end
 
-function plot_clean(signal, I_signal, Q_signal, fs, zoom_limit; const_lims=(-1.5, 1.5))
+function plot_clean(signal, I_signal, Q_signal, fs, zoom_limit;
+                    sig_label="QPSK Signal", const_lims=(-1.5, 1.5))
 
     t_zoom, sig_zoom = zoom_time(signal, fs, zoom_limit)
 
     # Plot the clean signal in time domain
-    p_time = plot_time(t_zoom, sig_zoom)
-    p_freq = plot_spectrum(signal, fs)
-    p_const = plot_const(I_signal, Q_signal; const_lims=const_lims)
+    p_time = plot_time(t_zoom, sig_zoom; sig_label=sig_label)
+    p_freq = plot_spectrum(signal, fs; sig_label=sig_label)
+    p_const = plot_const(I_signal, Q_signal; sig_label=sig_label, const_lims=const_lims)
     # Combine time, frequency and constellation plots
     l = @layout [[a; b] c]
     final_plot = plot(p_time, p_freq, p_const,
         layout = l, 
         size = (1300, 600), 
-        margin = 5mm,           # Global margin for all sides
-        bottom_margin = 15mm,   # Extra space for the cut-off frequency labels
+        margin = 5mm,
+        top_margin = 10mm,
+        bottom_margin = 15mm,
         left_margin = 10mm)
     return final_plot
 end
